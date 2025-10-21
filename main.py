@@ -13,19 +13,19 @@ GAS_CONSTANT = 287.05  # J/(kg·K)
 # ----------------------------
 # TOGGLES
 # ----------------------------
-ENABLE_OPENROCKET_COMPARISON = False
-ENABLE_LAUNCH_SITE_PRINT = True
+ENABLE_OPENROCKET_COMPARISON = True
+ENABLE_LAUNCH_SITE_PRINT = False
 ENABLE_TARC_SCORING = False
 
 # ----------------------------
-# LAUNCH SITE CONDITIONS (modifiable)
+# LAUNCH SITE CONDITIONS
 # ----------------------------
 launch_site = {
     "elevation_m": 0.0,       # meters
     "temperature_C": 15.0,  
     "pressure_kPa": 101.3,    
-    "wind_speed_mps": 4.4704,   
-    "wind_direction_deg": 170 # from north, clockwise
+    "wind_speed_mps": 2,   
+    "wind_direction_deg": 90 # from north, clockwise
 }
 
 # ----------------------------
@@ -166,10 +166,11 @@ def simulate(rocket, burnout_time, parachute_deploy_time, launch_angle_deg=88, d
 
     while True:
         
-        if y[1,0] >= 200 and not latch:
-            rocket.drag_coefficient = 0.75  # higher drag at high speeds
-            rocket.area = 50
-            latch = True
+        # airbrakes
+   #     if y[1,0] >= 200 and not latch:
+    #        rocket.drag_coefficient = 0.75  
+    #        rocket.area = 50
+    #        latch = True
         
         if not parachute and t >= parachute_deploy_time:
             parachute = True
@@ -390,26 +391,26 @@ if __name__ == "__main__":
 
     # rocket info
     rocket = Rocket(
-        mass_dry=0.490,
-        motor_mass_initial=0.082,
-        motor_mass_final=0.0555,
-        burn_time=0.986,
-        diameter=0.068,
-        drag_coefficient=0.6,
-        parachute_area=0.1294,
+        mass_dry=0.428, #kg
+        motor_mass_initial=0.128, #kg
+        motor_mass_final=0.0657, #kg
+        burn_time=1.71,
+        diameter=0.0671, #m
+        drag_coefficient=0.37, 
+        parachute_area=0.1639,
         parachute_cd=0.8,
-        thrust_csv=os.path.join("Motor CSVS", "AeroTech_F51NT_ThrustCurve.csv")
+        thrust_csv=os.path.join("Motor CSVS", "AeroTech_G80T-7_ThrustCurve.csv")
     )
 
     # launch parameters
-    launch_angle = 88  # degrees, slightly off vertical for horizontal motion
+    launch_angle = 90
     print_rocket_info(rocket, launch_angle)
     print_launch_site_info(launch_angle)
 
     # motor burnout and parachute deployment
     ts = np.linspace(0, 5, 5000)
     burnout_time = next((t for t in ts if rocket.thrust_func(t) <= 1.0), 1.5)
-    parachute_deploy_time = burnout_time + 3x
+    parachute_deploy_time = burnout_time + 7 # integer is ejection delay
 
     # simulate the flight
     trajectory, parachute_time, landed_time = simulate(
@@ -417,7 +418,7 @@ if __name__ == "__main__":
     )
 
     # plot trajectory and OpenRocket comparison
-    openrocket_csv_path = "OpenRocket Sims/Sim1FullTARC.csv" if ENABLE_OPENROCKET_COMPARISON else None
+    openrocket_csv_path = "OpenRocket Sims/SimN-1 V1.csv" if ENABLE_OPENROCKET_COMPARISON else None
     plot_trajectory(trajectory, parachute_time, landed_time, openrocket_csv_path)
     
     # flight stats
