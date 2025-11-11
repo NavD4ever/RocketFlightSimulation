@@ -13,19 +13,21 @@ GAS_CONSTANT = 287.05  # J/(kg·K)
 # ----------------------------
 # TOGGLES
 # ----------------------------
-ENABLE_OPENROCKET_COMPARISON = True
-ENABLE_LAUNCH_SITE_PRINT = False
-ENABLE_TARC_SCORING = False
+ENABLE_OPENROCKET_COMPARISON = False
+ENABLE_LAUNCH_SITE_PRINT = True
+ENABLE_TARC_SCORING = True
 
 # ----------------------------
 # LAUNCH SITE CONDITIONS
 # ----------------------------
 launch_site = {
-    "elevation_m": 0.0,       # meters
-    "temperature_C": 15.0,  
-    "pressure_kPa": 101.3,    
-    "wind_speed_mps": 2,   
-    "wind_direction_deg": 90 # from north, clockwise
+    "elevation_m": 123.129,       # meters
+    "temperature_C": 15.67,  # celsius
+    "pressure_kPa": 100.7112,    # kPa
+    "wind_speed_mps": 8.4,   # base wind for 28mph gusts
+    "wind_direction_deg": 315, # from north, clockwise
+    "gust_intensity": 0.49,   # allows gusts up to 12.5 m/s (28mph)
+    "gust_frequency": 0.2     # gust frequency (Hz)
 }
 
 # ----------------------------
@@ -108,6 +110,25 @@ def rk4_step(f, t, y, dt, *args):
     return y + (dt / 6) * (k1 + 2*k2 + 2*k3 + k4)
 
 # ----------------------------
+# WIND GUST MODEL
+# ----------------------------
+def get_wind_at_time(t):
+    base_speed = launch_site["wind_speed_mps"]
+    base_dir = launch_site["wind_direction_deg"]
+    gust_intensity = launch_site["gust_intensity"]
+    gust_freq = launch_site["gust_frequency"]
+    
+    # Add sinusoidal gusts with random phase
+    gust_factor = 1 + gust_intensity * np.sin(2 * np.pi * gust_freq * t + np.sin(0.3 * t))
+    wind_speed = base_speed * gust_factor
+    
+    # Add directional variation
+    dir_variation = 15 * np.sin(2 * np.pi * gust_freq * t * 0.7)
+    wind_direction = base_dir + dir_variation
+    
+    return wind_speed, wind_direction
+
+# ----------------------------
 # FORCE MODEL
 # ----------------------------
 def compute_force(t, y, rocket, parachute, parachute_fully_inflated,
@@ -116,6 +137,17 @@ def compute_force(t, y, rocket, parachute, parachute_fully_inflated,
     velocity_mag = np.sqrt(vx**2 + vy**2)
     rho = air_density_at_altitude(altitude)
     mass = rocket.total_mass(t)
+    
+    # Get current wind conditions
+    wind_speed, wind_dir_deg = get_wind_at_time(t)
+    wind_dir_rad = np.radians(wind_dir_deg)
+    wind_vx = -wind_speed * np.sin(wind_dir_rad)
+    wind_vy = -wind_speed * np.cos(wind_dir_rad)
+    
+    # Relative velocity (rocket velocity relative to wind)
+    rel_vx = vx - wind_vx
+    rel_vy = vy - wind_vy
+    rel_velocity_mag = np.sqrt(rel_vx**2 + rel_vy**2)
 
     # parachute modeling
     if parachute:
@@ -127,11 +159,11 @@ def compute_force(t, y, rocket, parachute, parachute_fully_inflated,
     else:
         cd, area = rocket.drag_coefficient, rocket.area
 
-    # drag forces
-    if velocity_mag > 0:
-        drag_force = 0.5 * rho * cd * area * velocity_mag**2
-        drag_x = -drag_force * (vx / velocity_mag)
-        drag_y = -drag_force * (vy / velocity_mag)
+    # drag forces (using relative velocity)
+    if rel_velocity_mag > 0:
+        drag_force = 0.5 * rho * cd * area * rel_velocity_mag**2
+        drag_x = -drag_force * (rel_vx / rel_velocity_mag)
+        drag_y = -drag_force * (rel_vy / rel_velocity_mag)
     else:
         drag_x = drag_y = 0
 
@@ -242,24 +274,22 @@ def plot_trajectory(trajectory, parachute_time, landed_time, openrocket_csv_path
     axs[2].legend()
     axs[2].grid(True)
 
-    # --- top down flight  path ---
-    wind_speed = launch_site["wind_speed_mps"]
-    wind_dir_deg = launch_site["wind_direction_deg"]
-    wind_dir_rad = np.radians(wind_dir_deg)
-
-    # wind vs movement
-    wind_vx = -wind_speed * np.sin(wind_dir_rad)
-    wind_vy = -wind_speed * np.cos(wind_dir_rad)
-
-    # ground drift 
+    # --- top down flight path with gusts ---
+    # Calculate drift with time-varying wind
     drift_x = 0.0
     drift_y = 0.0
     dt = times[1] - times[0]
     descent_started = False
+    
     for i in range(1, len(times)):
         if not descent_started and altitudes[i] < altitudes[i-1]:
             descent_started = True
         if descent_started:
+            # Get wind at this time
+            wind_speed, wind_dir_deg = get_wind_at_time(times[i])
+            wind_dir_rad = np.radians(wind_dir_deg)
+            wind_vx = -wind_speed * np.sin(wind_dir_rad)
+            wind_vy = -wind_speed * np.cos(wind_dir_rad)
             drift_x += wind_vx * dt
             drift_y += wind_vy * dt
 
@@ -344,6 +374,7 @@ def print_rocket_info(rocket, launch_angle):
     print(f"Motor Mass (empty):     {rocket.motor_mass_final*1000:.1f} g")
     print(f"Total Launch Mass:      {(rocket.mass_dry + rocket.motor_mass_initial)*1000:.1f} g")
     print(f"Propellant Mass:        {(rocket.motor_mass_initial - rocket.motor_mass_final)*1000:.1f} g")
+    print(f"Mass Ratio:             {(rocket.mass_dry + rocket.motor_mass_initial)/(rocket.mass_dry + rocket.motor_mass_final):.2f}")
     diameter = np.sqrt(rocket.area/np.pi)*2
     print(f"Diameter:               {diameter*100:.1f} cm")
     print(f"Cross-sectional Area:   {rocket.area*10000:.1f} cm^2")
@@ -352,6 +383,7 @@ def print_rocket_info(rocket, launch_angle):
     print(f"Parachute Diameter:     {parachute_diameter*100:.1f} cm")
     print(f"Parachute Area:         {rocket.parachute_area:.3f} m^2")
     print(f"Parachute Cd:           {rocket.parachute_cd:.1f}")
+    print(f"Recovery System:        Single parachute deployment")
 
 def print_launch_site_info(launch_angle):
     if ENABLE_LAUNCH_SITE_PRINT:
@@ -360,26 +392,45 @@ def print_launch_site_info(launch_angle):
         print("-"*60)
         print(f"Launch Angle:           {launch_angle} deg")
         print(f"Launch Site Elevation:  {launch_site['elevation_m']} m")
-        print(f"Air Density:            {air_density_at_altitude(launch_site['elevation_m']):.3f} kg/m^3")
-        print(f"Temperature:            {launch_site['temperature_C']} C")
-        print(f"Pressure:               {launch_site['pressure_kPa']} kPa")
-        print(f"Wind Speed:             {launch_site['wind_speed_mps']} m/s")
+        print(f"Air Density:            {air_density_at_altitude(launch_site['elevation_m']):.3f} kg/m³")
+        print(f"Atmospheric Model:      Standard atmosphere")
+        print(f"Temperature:            {launch_site['temperature_C']}°C ({launch_site['temperature_C']*9/5+32:.1f}°F)")
+        print(f"Pressure:               {launch_site['pressure_kPa']} kPa ({launch_site['pressure_kPa']*0.145:.1f} psi)")
+        print(f"Wind Speed:             {launch_site['wind_speed_mps']:.1f} m/s ({launch_site['wind_speed_mps']*2.237:.1f} mph)")
+    print(f"Wind Direction:         {launch_site['wind_direction_deg']} degrees from north")
 
 def print_flight_stats(trajectory, burnout_time, parachute_time):
     times, x_positions, altitudes, velocities = zip(*trajectory)
+    
+    # Calculate accelerations
+    accelerations = [(v2-v1)/(t2-t1) for (t1,_,_,v1),(t2,_,_,v2) in zip(trajectory[:-1], trajectory[1:])]
+    
+    # Key metrics
     max_alt = max(altitudes)
+    max_alt_ft = max_alt * 3.28084
     max_vel = max(velocities)
+    max_accel = max(accelerations)
+    max_g_force = max_accel / 9.81
     final_x = x_positions[-1]
     total_time = times[-1]
+    landing_velocity = abs(velocities[-1])
+    
+    # Find times for key events
+    apogee_time = times[altitudes.index(max_alt)]
+    max_vel_time = times[velocities.index(max_vel)]
+    max_accel_time = times[accelerations.index(max_accel)]
+    
     print("\n" + "-"*60)
     print("                    FLIGHT PERFORMANCE SUMMARY")
     print("-"*60)
-    print(f"Max Altitude:        {max_alt*3.28084:.0f} ft")
-    print(f"Max Velocity:        {max_vel:.1f} m/s")
-    print(f"Motor Burnout Time:  {burnout_time:.2f} s")
-    print(f"Parachute Deploy:    {parachute_time:.2f} s")
-    print(f"Total Flight Time:   {total_time:.1f} s")
-    print(f"Horizontal Distance: {final_x*3.28084:.0f} ft")
+    print(f"Maximum Altitude:       {max_alt_ft:.0f} ft ({max_alt:.0f} m) @ {apogee_time:.2f}s")
+    print(f"Maximum Velocity:       {max_vel:.1f} m/s ({max_vel*2.237:.1f} mph) @ {max_vel_time:.2f}s")
+    print(f"Maximum Acceleration:   {max_accel:.1f} m/s² ({max_g_force:.1f} G) @ {max_accel_time:.2f}s")
+    print(f"Motor Burnout Time:     {burnout_time:.2f} s")
+    print(f"Parachute Deployment:   {parachute_time:.2f} s")
+    print(f"Total Flight Time:      {total_time:.1f} s")
+    print(f"Horizontal Distance:    {final_x*3.28084:.0f} ft ({final_x:.0f} m)")
+    print(f"Landing Velocity:       {landing_velocity:.1f} m/s ({landing_velocity*2.237:.1f} mph)")
 
 # ----------------------------
 # MAIN
@@ -391,15 +442,15 @@ if __name__ == "__main__":
 
     # rocket info
     rocket = Rocket(
-        mass_dry=0.428, #kg
-        motor_mass_initial=0.128, #kg
-        motor_mass_final=0.0657, #kg
-        burn_time=1.71,
-        diameter=0.0671, #m
+        mass_dry=0.523, #kg
+        motor_mass_initial=0.082, #kg
+        motor_mass_final=0.0575, #kg
+        burn_time=0.986,
+        diameter=0.0668, #m
         drag_coefficient=0.37, 
-        parachute_area=0.1639,
+        parachute_area=0.4572,# m^2
         parachute_cd=0.8,
-        thrust_csv=os.path.join("Motor CSVS", "AeroTech_G80T-7_ThrustCurve.csv")
+        thrust_csv=os.path.join("Motor CSVS", "AeroTech_F51NT_ThrustCurve.csv")
     )
 
     # launch parameters
@@ -410,7 +461,7 @@ if __name__ == "__main__":
     # motor burnout and parachute deployment
     ts = np.linspace(0, 5, 5000)
     burnout_time = next((t for t in ts if rocket.thrust_func(t) <= 1.0), 1.5)
-    parachute_deploy_time = burnout_time + 7 # integer is ejection delay
+    parachute_deploy_time = burnout_time + 8 # integer is ejection delay
 
     # simulate the flight
     trajectory, parachute_time, landed_time = simulate(
@@ -446,10 +497,21 @@ if __name__ == "__main__":
             # total score
             total_score = altitude_score + Time_score
             
-            print("\nTARC Scores:")
-            print(f"Altitude Score: {altitude_score:.1f}")
-            print(f"Time Score: {Time_score:.1f}")
-            print(f"Total Score: {total_score:.1f}")
+            print("\n" + "-"*60)
+            print("                    TARC COMPETITION SCORING")
+            print("-"*60)
+            print(f"Target Altitude:        750 ft")
+            print(f"Actual Altitude:        {apogee_ft:.1f} ft")
+            print(f"Altitude Error:         {abs(apogee_ft - 750):.1f} ft")
+            print(f"Target Flight Time:     36-39 seconds")
+            print(f"Actual Flight Time:     {total_flight_time:.1f} s")
+            print(f"Altitude Score:         {altitude_score:.1f} points")
+            print(f"Time Score:             {Time_score:.1f} points")
+            print(f"Total TARC Score:       {total_score:.1f} points")
         
         compute_tarc_scores(trajectory)
+        
+    print("\n" + "="*60)
+    print("                    SIMULATION COMPLETE")
+    print("="*60)
 
