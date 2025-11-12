@@ -24,7 +24,7 @@ launch_site = {
     "elevation_m": 123.129,       # meters
     "temperature_C": 15.67,  # celsius
     "pressure_kPa": 100.7112,    # kPa
-    "wind_speed_mps": 8.4,   # base wind for 28mph gusts
+    "wind_speed_mps": 8.4,   
     "wind_direction_deg": 315, # from north, clockwise
     "gust_intensity": 0.49,   # allows gusts up to 12.5 m/s (28mph)
     "gust_frequency": 0.2     # gust frequency (Hz)

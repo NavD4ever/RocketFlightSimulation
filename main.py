@@ -13,20 +13,24 @@ GAS_CONSTANT = 287.05  # J/(kg·K)
 # ----------------------------
 # TOGGLES
 # ----------------------------
-ENABLE_OPENROCKET_COMPARISON = True
+ENABLE_OPENROCKET_COMPARISON = False
 ENABLE_LAUNCH_SITE_PRINT = False
 ENABLE_TARC_SCORING = False
+
+
+# Rocket selection
+ROCKET_NAME = "PersonN-1"
 
 # ----------------------------
 # LAUNCH SITE CONDITIONS
 # ----------------------------
 launch_site = {
-    "elevation_m": 0.0,       # meters
-    "temperature_C": 15.0,  
-    "pressure_kPa": 101.3,    
-    "wind_speed_mps": 2,   
-    "wind_direction_deg": 90, # from north, clockwise
-    "gust_intensity": 0.5,    # gust strength multiplier
+    "elevation_m": 123.129,       # meters
+    "temperature_C": 15.67,  # celsius
+    "pressure_kPa": 100.7112,    # kPa
+    "wind_speed_mps": 8.4,   
+    "wind_direction_deg": 315, # from north, clockwise
+    "gust_speed_mph": 29,    # max gust speed 
     "gust_frequency": 0.2     # gust frequency (Hz)
 }
 
@@ -109,18 +113,41 @@ def rk4_step(f, t, y, dt, *args):
     k4 = f(t + dt, y + dt * k3, *args)
     return y + (dt / 6) * (k1 + 2*k2 + 2*k3 + k4)
 
+
+
+def load_rocket(rocket_name):
+    """Load rocket configuration from Rockets folder"""
+    rocket_file = os.path.join("Rockets", f"{rocket_name}.py")
+    
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("rocket_config", rocket_file)
+    config = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(config)
+    
+    return Rocket(
+        mass_dry=config.mass_dry,
+        motor_mass_initial=config.motor_mass_initial,
+        motor_mass_final=config.motor_mass_final,
+        burn_time=config.burn_time,
+        diameter=config.diameter,
+        drag_coefficient=config.drag_coefficient,
+        parachute_area=config.parachute_area,
+        parachute_cd=config.parachute_cd,
+        thrust_csv=config.thrust_csv
+    )
+
 # ----------------------------
 # WIND GUST MODEL
 # ----------------------------
 def get_wind_at_time(t):
     base_speed = launch_site["wind_speed_mps"]
     base_dir = launch_site["wind_direction_deg"]
-    gust_intensity = launch_site["gust_intensity"]
+    max_gust_mps = launch_site["gust_speed_mph"] * 0.44704  # convert mph to m/s
     gust_freq = launch_site["gust_frequency"]
     
-    # Add sinusoidal gusts with random phase
-    gust_factor = 1 + gust_intensity * np.sin(2 * np.pi * gust_freq * t + np.sin(0.3 * t))
-    wind_speed = base_speed * gust_factor
+    # Gust varies between base wind and max gust speed
+    gust_factor = 0.5 * (1 + np.sin(2 * np.pi * gust_freq * t + np.sin(0.3 * t)))
+    wind_speed = base_speed + (max_gust_mps - base_speed) * gust_factor
     
     # Add directional variation
     dir_variation = 15 * np.sin(2 * np.pi * gust_freq * t * 0.7)
@@ -440,18 +467,8 @@ if __name__ == "__main__":
     print("                    ROCKET FLIGHT SIMULATOR")
     print("-"*60)
 
-    # rocket info
-    rocket = Rocket(
-        mass_dry=0.428, #kg
-        motor_mass_initial=0.128, #kg
-        motor_mass_final=0.0657, #kg
-        burn_time=1.71,
-        diameter=0.0671, #m
-        drag_coefficient=0.37, 
-        parachute_area=0.1639,
-        parachute_cd=0.8,
-        thrust_csv=os.path.join("Motor CSVS", "AeroTech_G80T-7_ThrustCurve.csv")
-    )
+    # load rocket
+    rocket = load_rocket("Tarc")
 
     # launch parameters
     launch_angle = 90
@@ -474,6 +491,8 @@ if __name__ == "__main__":
     
     # flight stats
     print_flight_stats(trajectory, burnout_time, parachute_time)
+    
+
 
     # TARC compeition score calculator
     if ENABLE_TARC_SCORING:
