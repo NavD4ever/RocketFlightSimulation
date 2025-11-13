@@ -9,4 +9,5 @@ diameter = 0.0668  # m
 drag_coefficient = 0.44
 parachute_area = 0.4572  # m^2
 parachute_cd = 0.8
+ejection_delay = 7  # seconds
 thrust_csv = os.path.join("Motor CSVS", "AeroTech_F51NT_ThrustCurve.csv")

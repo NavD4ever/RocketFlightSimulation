@@ -15,24 +15,38 @@ GAS_CONSTANT = 287.05  # J/(kg·K)
 # ----------------------------
 ENABLE_OPENROCKET_COMPARISON = False
 ENABLE_LAUNCH_SITE_PRINT = False
-ENABLE_TARC_SCORING = False
+ENABLE_TARC_SCORING = True
 
 
 # Rocket selection
-ROCKET_NAME = "PersonN-1"
+ROCKET_NAME = "Tarc"
+
+# Weather selection
+WEATHER_NAME = "11.16"
 
 # ----------------------------
 # LAUNCH SITE CONDITIONS
 # ----------------------------
-launch_site = {
-    "elevation_m": 123.129,       # meters
-    "temperature_C": 15.67,  # celsius
-    "pressure_kPa": 100.7112,    # kPa
-    "wind_speed_mps": 8.4,   
-    "wind_direction_deg": 315, # from north, clockwise
-    "gust_speed_mph": 29,    # max gust speed 
-    "gust_frequency": 0.2     # gust frequency (Hz)
-}
+def load_weather(weather_name):
+    """Load weather configuration from Weather folder"""
+    weather_file = os.path.join("Weather", f"{weather_name}.py")
+    
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("weather_config", weather_file)
+    config = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(config)
+    
+    return {
+        "elevation_m": config.elevation_m,
+        "temperature_C": config.temperature_C,
+        "pressure_kPa": config.pressure_kPa,
+        "wind_speed_mps": config.wind_speed_mps,
+        "wind_direction_deg": config.wind_direction_deg,
+        "gust_speed_mph": config.gust_speed_mph,
+        "gust_frequency": config.gust_frequency
+    }
+
+launch_site = load_weather(WEATHER_NAME)
 
 # ----------------------------
 # ATMOSPHERE MODELS
@@ -124,7 +138,7 @@ def load_rocket(rocket_name):
     config = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(config)
     
-    return Rocket(
+    rocket = Rocket(
         mass_dry=config.mass_dry,
         motor_mass_initial=config.motor_mass_initial,
         motor_mass_final=config.motor_mass_final,
@@ -135,6 +149,8 @@ def load_rocket(rocket_name):
         parachute_cd=config.parachute_cd,
         thrust_csv=config.thrust_csv
     )
+    rocket.ejection_delay = config.ejection_delay
+    return rocket
 
 # ----------------------------
 # WIND GUST MODEL
@@ -478,7 +494,7 @@ if __name__ == "__main__":
     # motor burnout and parachute deployment
     ts = np.linspace(0, 5, 5000)
     burnout_time = next((t for t in ts if rocket.thrust_func(t) <= 1.0), 1.5)
-    parachute_deploy_time = burnout_time + 7 # integer is ejection delay
+    parachute_deploy_time = burnout_time + rocket.ejection_delay
 
     # simulate the flight
     trajectory, parachute_time, landed_time = simulate(
