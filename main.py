@@ -22,7 +22,7 @@ ENABLE_TARC_SCORING = True
 ROCKET_NAME = "Tarc"
 
 # Weather selection
-WEATHER_NAME = "11.16"
+WEATHER_NAME = "3.29"
 
 # ----------------------------
 # LAUNCH SITE CONDITIONS
@@ -67,12 +67,18 @@ def make_launch_site(elevation_ft, temperature_f, pressure_inHg,
 # ====BASIC ATMOSPHERE SETUP(less time)====
 
 def air_density_at_altitude(alt_m):
+    # alt_m is AGL (starts at 0 at launch site)
+    site_temp_K   = launch_site["temperature_C"] + 273.15
+    site_pressure = launch_site["pressure_kPa"] * 1000  # Pa
+    site_density  = site_pressure / (GAS_CONSTANT * site_temp_K)
+
+    if alt_m <= 0:
+        return site_density
     if alt_m < 11000:
-        temp = 288.15 - 0.0065 * alt_m
-        pressure = 101325 * (temp / 288.15)**5.2561
-        return pressure / (GAS_CONSTANT * temp)
+        temp = site_temp_K - 0.0065 * alt_m
+        return site_density * (temp / site_temp_K) ** (GRAVITY / (GAS_CONSTANT * 0.0065))
     else:
-        return 1.225 * np.exp(-alt_m / 8400)
+        return site_density * np.exp(-alt_m / 8400)
 
 
 # ====ADVANCED ATMOSPHERE SETUP(takes a bit of time)====
@@ -167,11 +173,12 @@ def load_rocket(rocket_name):
 # ----------------------------
 # WIND GUST MODEL
 # ----------------------------
-def get_wind_at_time(t):
-    base_speed = launch_site["wind_speed_mps"]
-    base_dir   = launch_site["wind_direction_deg"]
-    max_gust_mps = launch_site["gust_speed_mps"]
-    gust_freq  = launch_site["gust_frequency"]
+def get_wind_at_time(t, site=None):
+    s = site if site is not None else launch_site
+    base_speed = s["wind_speed_mps"]
+    base_dir   = s["wind_direction_deg"]
+    max_gust_mps = s["gust_speed_mps"]
+    gust_freq  = s["gust_frequency"]
     
     # Gust varies between base wind and max gust speed
     gust_factor = 0.5 * (1 + np.sin(2 * np.pi * gust_freq * t + np.sin(0.3 * t)))
@@ -189,19 +196,17 @@ def get_wind_at_time(t):
 def compute_force(t, y, rocket, parachute, parachute_fully_inflated,
                   inflation_start_time, inflation_duration, current_time, launch_angle):
     x, altitude, vx, vy = y[0,0], y[1,0], y[2,0], y[3,0]
-    velocity_mag = np.sqrt(vx**2 + vy**2)
     rho = air_density_at_altitude(altitude)
     mass = rocket.total_mass(t)
     
-    # Get current wind conditions
-    wind_speed, wind_dir_deg = get_wind_at_time(t)
-    wind_dir_rad = np.radians(wind_dir_deg)
-    wind_vx = -wind_speed * np.sin(wind_dir_rad)
-    wind_vy = -wind_speed * np.cos(wind_dir_rad)
-    
-    # Relative velocity (rocket velocity relative to wind)
-    rel_vx = vx - wind_vx
-    rel_vy = vy - wind_vy
+    # Wind only affects drag during descent (parachute phase)
+    if parachute:
+        wind_speed, wind_dir_deg = get_wind_at_time(t, site=launch_site)
+        wind_dir_rad = np.radians(wind_dir_deg)
+        rel_vx = vx - (-wind_speed * np.sin(wind_dir_rad))
+        rel_vy = vy - (-wind_speed * np.cos(wind_dir_rad))
+    else:
+        rel_vx, rel_vy = vx, vy
     rel_velocity_mag = np.sqrt(rel_vx**2 + rel_vy**2)
 
     # parachute modeling
@@ -235,7 +240,7 @@ def compute_force(t, y, rocket, parachute, parachute_fully_inflated,
 # ----------------------------
 # SIMULATION LOOP
 # ----------------------------
-def simulate(rocket, burnout_time, parachute_deploy_time, launch_angle_deg=88, dt=0.001):
+def simulate(rocket, burnout_time, parachute_deploy_time, launch_angle_deg=88, dt=0.001, max_time=300.0):
     launch_angle = np.radians(launch_angle_deg)
     y = np.array([[0.0],[0.0],[0.0],[0.0]])
     t = 0.0
@@ -251,7 +256,7 @@ def simulate(rocket, burnout_time, parachute_deploy_time, launch_angle_deg=88, d
 
     latch = False
 
-    while True:
+    while t < max_time:
         
         # airbrakes
    #     if y[1,0] >= 200 and not latch:
@@ -270,7 +275,7 @@ def simulate(rocket, burnout_time, parachute_deploy_time, launch_angle_deg=88, d
         y = rk4_step(compute_force, t, y, dt, rocket, parachute, parachute_fully_inflated,
                      inflation_start_time, inflation_duration, t, launch_angle)
         t += dt
-        trajectory.append((t, y[0,0], y[1,0], y[3,0]))
+        trajectory.append((t, y[0,0], y[1,0], np.sqrt(y[2,0]**2 + y[3,0]**2)))
 
         if y[1,0] <= 0.0 and t > 1.0 and landed_time is None:
             landed_time = t
@@ -505,7 +510,15 @@ if __name__ == "__main__":
 
     # motor burnout and parachute deployment
     ts = np.linspace(0, 5, 5000)
-    burnout_time = next((t for t in ts if rocket.thrust_func(t) <= 1.0), 1.5)
+    ignited = False
+    burnout_time = 1.5
+    for t_val in ts:
+        thrust = rocket.thrust_func(t_val)
+        if not ignited and thrust > 1.0:
+            ignited = True
+        elif ignited and thrust <= 1.0:
+            burnout_time = t_val
+            break
     parachute_deploy_time = burnout_time + rocket.ejection_delay
 
     # simulate the flight

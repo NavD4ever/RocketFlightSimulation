@@ -2,9 +2,9 @@ import numpy as np
 import sys
 import os
 
-# ── Configuration ──────────────────────────────────────────────
+# ── config ──────────────────────────────────────────────
 ROCKET_NAME  = "Tarc"
-WEATHER_NAME = "3.22"   # base weather file (elevation used from here)
+WEATHER_NAME = "3.29"   # base weather file (elev)
 TARGET_ALT_FT = 750.0
 LAUNCH_ANGLE  = 90
 
@@ -13,14 +13,9 @@ MASS_MAX     = 0.65
 TOLERANCE_FT = 0.5
 MAX_ITER     = 100
 
-# Each entry: (title, temp_f, pressure_inHg, wind_speed_mph, wind_dir_deg, gust_speed_mph)
+# entry: (title, temp_f, pressure_inHg, wind_speed_mph, wind_dir_deg, gust_speed_mph)
 CONDITIONS = [
-    ("8:00 AM",  38, 30.10,  5, 270, 12),
-    ("9:00 AM",  41, 30.08,  6, 275, 14),
-    ("10:00 AM", 45, 30.05,  7, 280, 16),
-    ("11:00 AM", 49, 30.02,  8, 285, 18),
-    ("12:00 PM", 52, 29.99,  9, 290, 20),
-    ("1:00 PM",  55, 29.97, 10, 295, 22),
+    ("4:00 PM",  59, 30.29, 16, 295, 26)
 ]
 # ───────────────────────────────────────────────────────────────
 
@@ -31,10 +26,18 @@ import main as sim
 def get_apogee_ft(mass_dry, launch_site):
     rocket = sim.load_rocket(ROCKET_NAME)
     rocket.mass_dry  = mass_dry
-    sim.launch_site  = launch_site
+    sim.launch_site.update(launch_site)
 
     ts = np.linspace(0, 5, 5000)
-    burnout_time = next((t for t in ts if rocket.thrust_func(t) <= 1.0), 1.5)
+    ignited = False
+    burnout_time = 1.5
+    for t_val in ts:
+        thrust = rocket.thrust_func(t_val)
+        if not ignited and thrust > 1.0:
+            ignited = True
+        elif ignited and thrust <= 1.0:
+            burnout_time = t_val
+            break
     parachute_deploy_time = burnout_time + rocket.ejection_delay
 
     trajectory, _, _ = sim.simulate(rocket, burnout_time, parachute_deploy_time,
@@ -46,13 +49,18 @@ def get_apogee_ft(mass_dry, launch_site):
 def binary_search_mass(launch_site, title):
     low, high = MASS_MIN, MASS_MAX
 
+    print(f"  checking bounds...")
     apogee_low  = get_apogee_ft(low,  launch_site)
+    print(f"  bound low:  mass={low:.4f} kg → {apogee_low:.1f} ft")
     apogee_high = get_apogee_ft(high, launch_site)
-    print(f"  bracket: {low:.4f} kg → {apogee_low:.1f} ft  |  {high:.4f} kg → {apogee_high:.1f} ft")
+    print(f"  bound high: mass={high:.4f} kg → {apogee_high:.1f} ft")
 
     if not (apogee_high <= TARGET_ALT_FT <= apogee_low):
-        print(f"  Target {TARGET_ALT_FT} ft not bracketed. Adjust MASS_MIN/MASS_MAX.")
-        return None
+        best_mass = low if abs(apogee_low - TARGET_ALT_FT) < abs(apogee_high - TARGET_ALT_FT) else high
+        best_apogee = apogee_low if best_mass == low else apogee_high
+        print(f"  Target {TARGET_ALT_FT} ft not bracketed [{apogee_high:.1f}–{apogee_low:.1f} ft]. Returning closest bound.")
+        print(f"  Best available: {best_mass*1000:.1f} g → {best_apogee:.1f} ft")
+        return best_mass
 
     for i in range(MAX_ITER):
         mid    = (low + high) / 2
@@ -96,15 +104,17 @@ def main():
         )
 
         mass = binary_search_mass(launch_site, title)
-        results.append((title, temp_f, pressure_inHg, wind_mph, mass))
+        apogee = get_apogee_ft(mass, launch_site) if mass else None
+        results.append((title, temp_f, pressure_inHg, wind_mph, mass, apogee))
 
     # Summary table
     print(f"\n{'='*65}")
-    print(f"  {'CONDITION':<12} {'TEMP':>6} {'PRESSURE':>10} {'WIND':>6}  {'PRED MASS':>10}")
-    print(f"  {'-'*12} {'-'*6} {'-'*10} {'-'*6}  {'-'*10}")
-    for title, temp_f, pressure_inHg, wind_mph, mass in results:
-        mass_str = f"{mass*1000:.1f} g" if mass else "N/A"
-        print(f"  {title:<12} {temp_f:>5}°F  {pressure_inHg:>8} inHg  {wind_mph:>4} mph  {mass_str:>10}")
+    print(f"  {'CONDITION':<12} {'TEMP':>6} {'PRESSURE':>10} {'WIND':>6}  {'PRED MASS':>10}  {'APOGEE':>9}")
+    print(f"  {'-'*12} {'-'*6} {'-'*10} {'-'*6}  {'-'*10}  {'-'*9}")
+    for title, temp_f, pressure_inHg, wind_mph, mass, apogee in results:
+        mass_str   = f"{mass*1000:.1f} g"  if mass   else "N/A"
+        apogee_str = f"{apogee:.1f} ft"    if apogee else "N/A"
+        print(f"  {title:<12} {temp_f:>5}°F  {pressure_inHg:>8} inHg  {wind_mph:>4} mph  {mass_str:>10}  {apogee_str:>9}")
     print(f"{'='*65}")
 
 

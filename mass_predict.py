@@ -4,7 +4,7 @@ import os
 
 # ── Configuration ──────────────────────────────────────────────
 ROCKET_NAME     = "Tarc"
-WEATHER_NAME    = "11.16"
+WEATHER_NAME    = "3.29"
 TARGET_ALT_FT   = 750.0   # target apogee in feet
 LAUNCH_ANGLE    = 90      # degrees
 
