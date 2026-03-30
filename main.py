@@ -37,16 +37,28 @@ def load_weather(weather_name):
     spec.loader.exec_module(config)
     
     return {
-        "elevation_m": config.elevation_m,
-        "temperature_C": config.temperature_C,
-        "pressure_kPa": config.pressure_kPa,
-        "wind_speed_mps": config.wind_speed_mps,
+        "elevation_m":        config.elevation_ft * 0.3048,
+        "temperature_C":      (config.temperature_f - 32) / 1.8,
+        "pressure_kPa":       config.pressure_inHg * 3.38639,
+        "wind_speed_mps":     config.wind_speed_mph * 0.44704,
         "wind_direction_deg": config.wind_direction_deg,
-        "gust_speed_mph": config.gust_speed_mph,
-        "gust_frequency": config.gust_frequency
+        "gust_speed_mps":     config.gust_speed_mph * 0.44704,
+        "gust_frequency":     config.gust_frequency
     }
 
 launch_site = load_weather(WEATHER_NAME)
+
+def make_launch_site(elevation_ft, temperature_f, pressure_inHg,
+                     wind_speed_mph, wind_direction_deg, gust_speed_mph, gust_frequency):
+    return {
+        "elevation_m":        elevation_ft * 0.3048,
+        "temperature_C":      (temperature_f - 32) / 1.8,
+        "pressure_kPa":       pressure_inHg * 3.38639,
+        "wind_speed_mps":     wind_speed_mph * 0.44704,
+        "wind_direction_deg": wind_direction_deg,
+        "gust_speed_mps":     gust_speed_mph * 0.44704,
+        "gust_frequency":     gust_frequency,
+    }
 
 # ----------------------------
 # ATMOSPHERE MODELS
@@ -157,9 +169,9 @@ def load_rocket(rocket_name):
 # ----------------------------
 def get_wind_at_time(t):
     base_speed = launch_site["wind_speed_mps"]
-    base_dir = launch_site["wind_direction_deg"]
-    max_gust_mps = launch_site["gust_speed_mph"] * 0.44704  # convert mph to m/s
-    gust_freq = launch_site["gust_frequency"]
+    base_dir   = launch_site["wind_direction_deg"]
+    max_gust_mps = launch_site["gust_speed_mps"]
+    gust_freq  = launch_site["gust_frequency"]
     
     # Gust varies between base wind and max gust speed
     gust_factor = 0.5 * (1 + np.sin(2 * np.pi * gust_freq * t + np.sin(0.3 * t)))
@@ -434,12 +446,12 @@ def print_launch_site_info(launch_angle):
         print("                    LAUNCH SITE CONDITIONS")
         print("-"*60)
         print(f"Launch Angle:           {launch_angle} deg")
-        print(f"Launch Site Elevation:  {launch_site['elevation_m']} m")
+        print(f"Launch Site Elevation:  {launch_site['elevation_m']/0.3048:.0f} ft")
         print(f"Air Density:            {air_density_at_altitude(launch_site['elevation_m']):.3f} kg/m³")
         print(f"Atmospheric Model:      Standard atmosphere")
-        print(f"Temperature:            {launch_site['temperature_C']}°C ({launch_site['temperature_C']*9/5+32:.1f}°F)")
-        print(f"Pressure:               {launch_site['pressure_kPa']} kPa ({launch_site['pressure_kPa']*0.145:.1f} psi)")
-        print(f"Wind Speed:             {launch_site['wind_speed_mps']:.1f} m/s ({launch_site['wind_speed_mps']*2.237:.1f} mph)")
+        print(f"Temperature:            {launch_site['temperature_C']*9/5+32:.1f}°F")
+        print(f"Pressure:               {launch_site['pressure_kPa']/3.38639:.2f} inHg")
+        print(f"Wind Speed:             {launch_site['wind_speed_mps']*2.237:.1f} mph")
     print(f"Wind Direction:         {launch_site['wind_direction_deg']} degrees from north")
 
 def print_flight_stats(trajectory, burnout_time, parachute_time):
