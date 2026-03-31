@@ -14,7 +14,7 @@ TOLERANCE_FT = 0.5
 MAX_ITER     = 100
 
 # entry: (title, temp_f, pressure_inHg, wind_speed_mph, wind_dir_deg, gust_speed_mph)
-CONDITIONS = [
+CONDITIONS = [                            
     ("4:00 PM",  59, 30.29, 16, 295, 26)
 ]
 # ───────────────────────────────────────────────────────────────
