@@ -2,6 +2,7 @@ import os
 
 # N-1 Rocket Configuration
 mass_dry = 0.468  # kg
+mass_payload = 0.0  # kg
 motor_mass_initial = 0.128  # kg
 motor_mass_final = 0.0657  # kg
 burn_time = 1.71

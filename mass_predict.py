@@ -38,7 +38,6 @@ def get_apogee_ft(mass_dry):
 def binary_search_mass():
     low, high = MASS_MIN, MASS_MAX
 
-    
     apogee_low  = get_apogee_ft(low)
     apogee_high = get_apogee_ft(high)
     print(f"  mass={low:.4f} kg → {apogee_low:.1f} ft")
@@ -59,7 +58,6 @@ def binary_search_mass():
         if abs(error) <= TOLERANCE_FT:
             print(f"\nConverged: mass_dry = {mid*1000:.1f} g  →  apogee = {apogee:.1f} ft")
             return mid
-
         # heavier rocket → lower apogee, so flip signs accordingly
         if error > 0:   # too high → need more mass
             low = mid

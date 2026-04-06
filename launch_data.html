@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Launch Data Table</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 2rem;
+      background: #f4f7fb;
+      color: #202124;
+    }
+
+    h1 {
+      margin-bottom: 0.5rem;
+      color: #1a237e;
+    }
+
+    .table-container {
+      overflow-x: auto;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
+      border-radius: 12px;
+      background: #ffffff;
+      padding: 1rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 720px;
+    }
+
+    thead th {
+      background: #1a237e;
+      color: white;
+      padding: 0.95rem 0.85rem;
+      text-align: left;
+      font-size: 0.95rem;
+      letter-spacing: 0.02em;
+    }
+
+    tbody tr:nth-child(even) {
+      background: #f8f9fd;
+    }
+
+    tbody td {
+      padding: 0.9rem 0.85rem;
+      border-bottom: 1px solid #e8ebf2;
+      font-size: 0.92rem;
+    }
+
+    tbody tr:hover {
+      background: #e8ecff;
+    }
+
+    .caption {
+      margin: 0 0 1rem;
+      color: #3c4043;
+    }
+
+    .note {
+      margin-top: 1rem;
+      font-size: 0.92rem;
+      color: #5f6368;
+    }
+  </style>
+</head>
+<body>
+  <h1>Launch Data</h1>
+  <p class="caption">This table is generated from the contents of <code>launch_data.csv</code>.</p>
+
+  <div class="table-container">
+    <table id="launch-table"></table>
+  </div>
+
+  <p class="note">Open this file in your browser from the same folder as <code>launch_data.csv</code>, or use it as a standalone static HTML file.</p>
+
+  <script>
+    const csvText = `date,temp(f),altitude(ft),wind_speed(mph),pressure(inHg),final_mass(g),ballast_mass(g),duration(s),egg(true/false),motor,time_of_day
+11.15,41,792,6,30.12,580,0,38.2,true,F-51, 9:25
+11.15,60,722,8,29.98,610,30,38,true,F-51, 9:45
+11.15,42,793,3,30.14,650,70,42,true,F-51,10:10
+12.6,36,740,4,29.99,625,45,33,true,F-51, 10:15
+12.6,40,752,4,29.94,624,44,33,true,F-51, 11:15
+12.20,38,766,4,30.28,620,40,32.8,true,F-51,9:15
+12.20,41,714,4,30.27,622,42,30.95,true,F-51,9:45
+12.20,43,752,4,30.26,622,42,34.1,true,F-51,10:25
+12.20,45,748,4,30.25,622,42,31.6,true,F-51,10:55
+12.20,46,776,3,30.24,623,43,33.96,true,F-51,11:20
+12.20,49,,3,30.24,624,44,36.25,true,F-51,12:00
+12.20,50,738,3,30.22,622,42,33.13,true,F-51,12:45
+3.14,45,765,5,30.12,620,40,35.1,true,F-51,8:25
+3.14,48,758,4,30.13,622,42,38,true,F-51,8:55
+3.14,52,776,5,30.14,623,43,39.24,true,F-51,9:20
+3.14,55,768,6,30.15,627,47,37,true,F-51,10:00
+3.7,63,724,7,30.22,641,61,32.9,true,F-51,8:35
+3.7,68,705,8,30.21,637,57,36.8,true,F-51,9:25
+3.7,71,678,9,30.19,635,55,30.56,true,F-51,10:15
+3.7,72,775,10,30.18,616,36,40.43,true,F-51,11:50
+3.7,76,792,12,30.14,620,40,38.29,true,F-51,12:55
+3.7,77,697,12,30.13,620,40,30.96,true,F-51,1:45`;
+
+    const lines = csvText.trim().split('\n');
+    const headers = lines.shift().split(',');
+    const rows = lines.map(line => {
+      const values = line.split(',');
+      return values.map(value => value.trim());
+    });
+
+    const table = document.getElementById('launch-table');
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    headers.forEach(headerText => {
+      const th = document.createElement('th');
+      th.textContent = headerText;
+      headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    rows.forEach(row => {
+      const tr = document.createElement('tr');
+      row.forEach(cell => {
+        const td = document.createElement('td');
+        td.textContent = cell === '' ? '—' : cell;
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+  </script>
+</body>
+</html>

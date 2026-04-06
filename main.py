@@ -14,8 +14,10 @@ GAS_CONSTANT = 287.05  # J/(kg·K)
 # TOGGLES
 # ----------------------------
 ENABLE_OPENROCKET_COMPARISON = False
-ENABLE_LAUNCH_SITE_PRINT = False
+ENABLE_LAUNCH_SITE_PRINT = True
 ENABLE_TARC_SCORING = True
+ENABLE_ADDITIONAL_GRAPHS = False
+ENABLE_SEPARATE_GRAPH_PAGES = False
 
 
 # Rocket selection
@@ -74,9 +76,11 @@ def air_density_at_altitude(alt_m):
 
     if alt_m <= 0:
         return site_density
+    lapse_rate = 0.0065  # K/m
     if alt_m < 11000:
-        temp = site_temp_K - 0.0065 * alt_m
-        return site_density * (temp / site_temp_K) ** (GRAVITY / (GAS_CONSTANT * 0.0065))
+        temp = site_temp_K - lapse_rate * alt_m
+        exponent = GRAVITY / (GAS_CONSTANT * lapse_rate)
+        return site_density * (temp / site_temp_K) ** exponent
     else:
         return site_density * np.exp(-alt_m / 8400)
 
@@ -107,9 +111,10 @@ def air_density_at_altitude(alt_m):
 # ROCKET CLASS
 # ----------------------------
 class Rocket:
-    def __init__(self, mass_dry, motor_mass_initial, motor_mass_final, burn_time,
+    def __init__(self, mass_dry, mass_payload, motor_mass_initial, motor_mass_final, burn_time,
                  diameter, drag_coefficient, parachute_area, parachute_cd, thrust_csv):
         self.mass_dry = mass_dry
+        self.mass_payload = mass_payload
         self.motor_mass_initial = motor_mass_initial
         self.motor_mass_final = motor_mass_final
         self.burn_time = burn_time
@@ -129,11 +134,12 @@ class Rocket:
         return interp1d(times, thrusts, bounds_error=False, fill_value=0.0)
 
     def total_mass(self, t):
+        base_mass = self.mass_dry + self.mass_payload
         if t >= self.burn_time:
-            return self.mass_dry + self.motor_mass_final
+            return base_mass + self.motor_mass_final
         burn_fraction = max(0, t / self.burn_time)
         propellant_burned = (self.motor_mass_initial - self.motor_mass_final) * burn_fraction
-        return self.mass_dry + self.motor_mass_initial - propellant_burned
+        return base_mass + self.motor_mass_initial - propellant_burned
 
 # ----------------------------
 # RK4 STEP
@@ -158,6 +164,7 @@ def load_rocket(rocket_name):
     
     rocket = Rocket(
         mass_dry=config.mass_dry,
+        mass_payload=config.mass_payload,
         motor_mass_initial=config.motor_mass_initial,
         motor_mass_final=config.motor_mass_final,
         burn_time=config.burn_time,
@@ -199,12 +206,13 @@ def compute_force(t, y, rocket, parachute, parachute_fully_inflated,
     rho = air_density_at_altitude(altitude)
     mass = rocket.total_mass(t)
     
-    # Wind only affects drag during descent (parachute phase)
+    # Wind only affects horizontal drift during descent (parachute phase)
     if parachute:
         wind_speed, wind_dir_deg = get_wind_at_time(t, site=launch_site)
         wind_dir_rad = np.radians(wind_dir_deg)
-        rel_vx = vx - (-wind_speed * np.sin(wind_dir_rad))
-        rel_vy = vy - (-wind_speed * np.cos(wind_dir_rad))
+        wind_vx = -wind_speed * np.sin(wind_dir_rad)
+        rel_vx = vx - wind_vx
+        rel_vy = vy  # wind has no vertical component
     else:
         rel_vx, rel_vy = vx, vy
     rel_velocity_mag = np.sqrt(rel_vx**2 + rel_vy**2)
@@ -258,12 +266,6 @@ def simulate(rocket, burnout_time, parachute_deploy_time, launch_angle_deg=88, d
 
     while t < max_time:
         
-        # airbrakes
-   #     if y[1,0] >= 200 and not latch:
-    #        rocket.drag_coefficient = 0.75  
-    #        rocket.area = 50
-    #        latch = True
-        
         if not parachute and t >= parachute_deploy_time:
             parachute = True
             parachute_time = t
@@ -275,24 +277,33 @@ def simulate(rocket, burnout_time, parachute_deploy_time, launch_angle_deg=88, d
         y = rk4_step(compute_force, t, y, dt, rocket, parachute, parachute_fully_inflated,
                      inflation_start_time, inflation_duration, t, launch_angle)
         t += dt
-        trajectory.append((t, y[0,0], y[1,0], np.sqrt(y[2,0]**2 + y[3,0]**2)))
+        trajectory.append((t, y[0,0], y[1,0], y[3,0]))
 
         if y[1,0] <= 0.0 and t > 1.0 and landed_time is None:
             landed_time = t
+            y[1,0] = 0.0
+            y[3,0] = 0.0
 
         if landed_time and t >= landed_time + post_landing_duration:
             break
 
         if y[1,0] < 0:
-            y[1,0] = 0
-            y[3,0] = 0
+            y[1,0] = 0.0
+            y[3,0] = 0.0
 
     return trajectory, parachute_time, landed_time
 
 # ----------------------------
 # PLOTTING & OPENROCKET COMPARISON
 # ----------------------------
-def plot_trajectory(trajectory, parachute_time, landed_time, openrocket_csv_path=None):
+def _make_ax(title, separate):
+    if separate:
+        fig, ax = plt.subplots(figsize=(8, 5))
+        fig.suptitle(title)
+        return fig, ax
+    return None, None
+
+def plot_trajectory(trajectory, parachute_time, landed_time, openrocket_csv_path=None, rocket=None):
     times, x_positions, altitudes, velocities = zip(*trajectory)
     positions_ft = [alt*3.28084 for alt in altitudes]
     x_positions_ft = [x*3.28084 for x in x_positions]
@@ -300,8 +311,11 @@ def plot_trajectory(trajectory, parachute_time, landed_time, openrocket_csv_path
     accelerations = [(v2-v1)/(t2-t1) for (t1,_,_,v1),(t2,_,_,v2) in zip(trajectory[:-1], trajectory[1:])]
     accelerations.append(accelerations[-1])
 
-    fig, axs = plt.subplots(3,2,figsize=(14,12))
-    axs = axs.flatten()
+    if ENABLE_SEPARATE_GRAPH_PAGES:
+        axs = [plt.subplots(figsize=(8,5))[1] for _ in range(6)]
+    else:
+        fig, axs = plt.subplots(3,2,figsize=(14,12))
+        axs = axs.flatten()
 
     # altitude vs time graph
     max_altitude = max(positions_ft)
@@ -388,8 +402,7 @@ def plot_trajectory(trajectory, parachute_time, landed_time, openrocket_csv_path
     print(f"\nPredicted Drift Distance: {total_drift_ft:.1f} ft")
     print(f"Predicted Drift Quadrant: {quadrant}")
 
-
-    # openRocket comparison if selected 
+    # openRocket comparison if selected
     if openrocket_csv_path:
         try:
             df = pd.read_csv(openrocket_csv_path, comment='#', header=None)
@@ -409,7 +422,6 @@ def plot_trajectory(trajectory, parachute_time, landed_time, openrocket_csv_path
             axs[5].set_ylabel("Velocity (m/s)")
             axs[5].legend()
             axs[5].grid(True)
-
         except Exception as e:
             axs[4].text(0.5,0.5,f"OpenRocket comparison failed:\n{e}",ha='center',va='center')
             axs[4].axis('off')
@@ -418,8 +430,112 @@ def plot_trajectory(trajectory, parachute_time, landed_time, openrocket_csv_path
         axs[4].axis('off')
         axs[5].axis('off')
 
-    plt.tight_layout()
-    plt.show()
+    if ENABLE_SEPARATE_GRAPH_PAGES:
+        for ax in axs:
+            ax.figure.tight_layout()
+            plt.figure(ax.figure.number)
+            plt.show()
+    else:
+        plt.tight_layout()
+        plt.show()
+
+    if ENABLE_ADDITIONAL_GRAPHS and rocket:
+        plot_additional(trajectory, rocket)
+
+
+def plot_additional(trajectory, rocket):
+    times, x_positions, altitudes, velocities = zip(*trajectory)
+    times      = list(times)
+    altitudes  = list(altitudes)
+    velocities = list(velocities)
+
+    rho_list   = [air_density_at_altitude(a) for a in altitudes]
+    mass_list  = [rocket.total_mass(t) for t in times]
+    thrust_list = [float(rocket.thrust_func(t)) for t in times]
+
+    # drag force (ascent only — no parachute, rocket body)
+    drag_list = [0.5 * rho * rocket.drag_coefficient * rocket.area * v**2
+                 for rho, v in zip(rho_list, velocities)]
+
+    # Mach number: speed of sound = sqrt(gamma * R * T(alt))
+    gamma = 1.4
+    site_temp_K = launch_site["temperature_C"] + 273.15
+    mach_list = []
+    for a, v in zip(altitudes, velocities):
+        temp_k = max(site_temp_K - 0.0065 * a, 216.65)
+        sos = np.sqrt(gamma * GAS_CONSTANT * temp_k)
+        mach_list.append(v / sos)
+
+    # energy
+    ke_list = [0.5 * m * v**2 for m, v in zip(mass_list, velocities)]
+    pe_list = [m * GRAVITY * a for m, a in zip(mass_list, altitudes)]
+    te_list = [ke + pe for ke, pe in zip(ke_list, pe_list)]
+
+    # wind speed over time
+    wind_list = [get_wind_at_time(t)[0] * 2.237 for t in times]  # mph
+
+    if ENABLE_SEPARATE_GRAPH_PAGES:
+        axs = [plt.subplots(figsize=(8,5))[1] for _ in range(6)]
+    else:
+        fig, axs = plt.subplots(3, 2, figsize=(14, 12))
+        axs = axs.flatten()
+
+    # thrust vs time
+    axs[0].plot(times, thrust_list, color='tab:red')
+    axs[0].set_title("Thrust vs Time")
+    axs[0].set_xlabel("Time (s)")
+    axs[0].set_ylabel("Thrust (N)")
+    axs[0].grid(True)
+
+    # drag force vs time
+    axs[1].plot(times, drag_list, color='tab:purple')
+    axs[1].set_title("Drag Force vs Time")
+    axs[1].set_xlabel("Time (s)")
+    axs[1].set_ylabel("Drag (N)")
+    axs[1].grid(True)
+
+    # air density vs altitude
+    axs[2].plot([a * 3.28084 for a in altitudes], rho_list, color='tab:brown')
+    axs[2].set_title("Air Density vs Altitude")
+    axs[2].set_xlabel("Altitude (ft)")
+    axs[2].set_ylabel("Density (kg/m³)")
+    axs[2].grid(True)
+
+    # mach number vs time
+    axs[3].plot(times, mach_list, color='tab:cyan')
+    axs[3].axhline(1.0, color='red', linestyle='--', label='Mach 1')
+    axs[3].set_title("Mach Number vs Time")
+    axs[3].set_xlabel("Time (s)")
+    axs[3].set_ylabel("Mach")
+    axs[3].legend()
+    axs[3].grid(True)
+
+    # energy vs time
+    axs[4].plot(times, ke_list, label="Kinetic", color='tab:orange')
+    axs[4].plot(times, pe_list, label="Potential", color='tab:blue')
+    axs[4].plot(times, te_list, label="Total", color='tab:green', linestyle='--')
+    axs[4].set_title("Energy vs Time")
+    axs[4].set_xlabel("Time (s)")
+    axs[4].set_ylabel("Energy (J)")
+    axs[4].legend()
+    axs[4].grid(True)
+
+    # wind speed vs time
+    axs[5].plot(times, wind_list, color='tab:olive')
+    axs[5].set_title("Wind Speed vs Time")
+    axs[5].set_xlabel("Time (s)")
+    axs[5].set_ylabel("Wind Speed (mph)")
+    axs[5].grid(True)
+
+    if ENABLE_SEPARATE_GRAPH_PAGES:
+        for ax in axs:
+            ax.figure.tight_layout()
+            plt.figure(ax.figure.number)
+            plt.show()
+    else:
+        plt.suptitle("Additional Flight Analysis", fontsize=14, fontweight='bold')
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        plt.show()
 
 
 # ----------------------------
@@ -430,11 +546,13 @@ def print_rocket_info(rocket, launch_angle):
     print("                    ROCKET SPECIFICATIONS")
     print("-"*60)
     print(f"Rocket Dry Mass:        {rocket.mass_dry*1000:.1f} g")
+    print(f"Payload Mass:           {rocket.mass_payload*1000:.1f} g")
+    print(f"Total Airframe Mass:    {(rocket.mass_dry+rocket.mass_payload)*1000:.1f} g")
     print(f"Motor Mass (loaded):    {rocket.motor_mass_initial*1000:.1f} g")
     print(f"Motor Mass (empty):     {rocket.motor_mass_final*1000:.1f} g")
-    print(f"Total Launch Mass:      {(rocket.mass_dry + rocket.motor_mass_initial)*1000:.1f} g")
+    print(f"Total Launch Mass:      {(rocket.mass_dry + rocket.mass_payload + rocket.motor_mass_initial)*1000:.1f} g")
     print(f"Propellant Mass:        {(rocket.motor_mass_initial - rocket.motor_mass_final)*1000:.1f} g")
-    print(f"Mass Ratio:             {(rocket.mass_dry + rocket.motor_mass_initial)/(rocket.mass_dry + rocket.motor_mass_final):.2f}")
+    print(f"Mass Ratio:             {(rocket.mass_dry + rocket.mass_payload + rocket.motor_mass_initial)/(rocket.mass_dry + rocket.mass_payload + rocket.motor_mass_final):.2f}")
     diameter = np.sqrt(rocket.area/np.pi)*2
     print(f"Diameter:               {diameter*100:.1f} cm")
     print(f"Cross-sectional Area:   {rocket.area*10000:.1f} cm^2")
@@ -528,7 +646,7 @@ if __name__ == "__main__":
 
     # plot trajectory and OpenRocket comparison
     openrocket_csv_path = "OpenRocket Sims/SimN-1 V1.csv" if ENABLE_OPENROCKET_COMPARISON else None
-    plot_trajectory(trajectory, parachute_time, landed_time, openrocket_csv_path)
+    plot_trajectory(trajectory, parachute_time, landed_time, openrocket_csv_path, rocket)
     
     # flight stats
     print_flight_stats(trajectory, burnout_time, parachute_time)

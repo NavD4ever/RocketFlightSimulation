@@ -25,19 +25,12 @@ import main as sim
 
 def get_apogee_ft(mass_dry, launch_site):
     rocket = sim.load_rocket(ROCKET_NAME)
-    rocket.mass_dry  = mass_dry
-    sim.launch_site.update(launch_site)
+    rocket.mass_dry = mass_dry
+    sim.launch_site = launch_site
 
     ts = np.linspace(0, 5, 5000)
-    ignited = False
-    burnout_time = 1.5
-    for t_val in ts:
-        thrust = rocket.thrust_func(t_val)
-        if not ignited and thrust > 1.0:
-            ignited = True
-        elif ignited and thrust <= 1.0:
-            burnout_time = t_val
-            break
+    burnout_time = next((t for t in ts if rocket.thrust_func(t) <= 1.0), 1.5)
+    rocket.burn_time = burnout_time
     parachute_deploy_time = burnout_time + rocket.ejection_delay
 
     trajectory, _, _ = sim.simulate(rocket, burnout_time, parachute_deploy_time,
